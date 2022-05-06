@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Document</title>
+</head>
+<body>
+<script type="text/javascript">
+  
+// main
+ 
+function main()
+{
+    var displaySize = new Coords(200, 200);
+  
+    var display = new Display(displaySize);
+  
+    var world = World.random(new Coords(0, .05), displaySize);
+  
+    Globals.Instance.initialize
+    (
+        10, // ticksPerSecond
+        display,
+        world
+    );
+}
+  
+// extensions
+ 
+function ArrayExtensions()
+{
+    // extension class
+}
+{
+    Array.prototype.clone = function()
+    {
+        var returnValues = [];
+ 
+        for (var i = 0; i < this.length; i++)
+        {
+            var element = this[i];
+            var elementCloned = element.clone();
+            returnValues.push(elementCloned);
+        }
+ 
+        return returnValues;
+    }
+}
+  
+// classes
+  
+function Activity(perform)
+{
+    this.perform = perform;
+}
+{
+    Activity.Instances = new Activity_Instances()
+      
+    function Activity_Instances()
+    {
+        this.DoNothing = new Activity(function perform() {});
+        this.UserInputAccept = new Activity
+        (
+            function perform(world, actor)
+            {
+                var inputHelper = Globals.Instance.inputHelper;
+                var inputActive = inputHelper.keyPressed;
+                var powerFactor = 1000;
+  
+                if (inputActive == "ArrowDown")
+                {
+                    actor.powerCurrent -= actor.powerPerTick;
+                    actor.powerCurrent = 
+                        Math.round(actor.powerCurrent * powerFactor) / powerFactor;
+                    if (actor.powerCurrent < actor.powerMin)
+                    {
+                        actor.powerCurrent = actor.powerMin;
+                    }
+                }   
+                else if (inputActive == "ArrowLeft")
+                {
+                    actor.firePolar.azimuthInTurns -= actor.turnsPerTick;
+                    actor.firePolar.trimAzimuthToRangeMinMax
+                    (
+                        actor.azimuthInTurnsMin, 
+                        actor.azimuthInTurnsMax
+                    );
+                }
+                else if (inputActive == "ArrowRight")
+                {
+                    actor.firePolar.azimuthInTurns += actor.turnsPerTick;
+                    actor.firePolar.trimAzimuthToRangeMinMax
+                    (
+                        actor.azimuthInTurnsMin, 
+                        actor.azimuthInTurnsMax
+                    );
+                }
+                else if (inputActive == "ArrowUp")
+                {
+                    actor.powerCurrent += actor.powerPerTick;
+                    actor.powerCurrent = 
+                        Math.round(actor.powerCurrent * powerFactor) / powerFactor;
+                    if (actor.powerCurrent > actor.powerMax)
+                    {
+                        actor.powerCurrent = actor.powerMax;
+                    }
+                }
+                else if (inputActive == "Enter")
+                {
+                    var projectile = new Projectile
+                    (
+                        actor.color,
+                        actor.muzzlePos.clone(),
+                        // vel
+                        actor.firePolar.toCoords
+                        (
+                            new Coords()
+                        ).normalize().multiplyScalar
+                        (
+                            actor.powerCurrent
+                        )
+                    );
+  
+                    world.projectiles = [ projectile ];
+  
+                    world.actorIndexCurrent = 1 - world.actorIndexCurrent;
+                }   
+                inputHelper.keyPressed = false;
+            }
+        );
+    }
+}
+  
+function Actor(color, pos, activity)
+{
+    this.color = color;
+    this.pos = pos;
+    this.activity = activity;
+  
+    this.wins = 0;
+    this.ticksSinceKilled = null;
+    this.ticksToDie = 30;
+  
+    this.collider = new Circle(this.pos, 8);
+  
+    this.powerMin = 1;
+    this.powerMax = 4;
+    this.powerPerTick = .1;
+  
+    this.azimuthInTurnsMin = .5;
+    this.azimuthInTurnsMax = 1;
+    this.turnsPerTick = 1.0 / Polar.DegreesPerTurn;
+    this.firePolar = new Polar
+    (
+        (this.azimuthInTurnsMin + this.azimuthInTurnsMax) / 2, 
+        this.collider.radius * 2
+    );
+    this.muzzlePos = this.pos.clone().add
+    (
+        this.firePolar.toCoords( new Coords() )
+    );
+  
+    this.vel = new Coords();
+  
+    this.reset();
+}
+{
+    Actor.prototype.reset = function()
+    {
+        this.firePolar.azimuthInTurns = 
+            (this.azimuthInTurnsMin + this.azimuthInTurnsMax) / 2, 
+        this.powerCurrent = (this.powerMin + this.powerMax) / 2;
+  
+        this.ticksSinceKilled = null;
+        this.pos.y = 0;
+        this.vel.clear();
+    }
+  
+    Actor.prototype.updateForTimerTick = function(world)
+    {
+        if (this.ticksSinceKilled == null)
+        {
+            if (this == world.actorCurrent() && world.projectiles.length == 0)
+            {
+                this.activity.perform(world, this);
+            }
+  
+            this.firePolar.toCoords(this.muzzlePos);
+            this.muzzlePos.add(this.pos);
+  
+            var surfaceAltitude = world.landscape.altitudeAtX
+            (
+                this.pos.x
+            );
+            var isBelowGround = (this.pos.y >= surfaceAltitude);
+            if (isBelowGround == false)
+            {
+                this.vel.add(world.gravityPerTick);
+                this.pos.add(this.vel);
+            }
+            else
+            {
+                this.vel.clear();
+                this.pos.y = surfaceAltitude;
+            }
+  
+        }
+        else if (this.ticksSinceKilled < this.ticksToDie)
+        {
+             this.ticksSinceKilled++;
+        }
+        else
+        {
+            world.reset();
+        }
+    }
+  
+    // drawable
+  
+    Actor.prototype.drawToDisplay = function(display)
+    {
+        display.drawCircle(this.pos, this.collider.radius, this.color);
+        display.drawLine
+        (
+            this.pos,
+            this.muzzlePos
+        );
+          
+        if (this == Globals.Instance.world.actorCurrent())
+        {
+            var fireAzimuthInTurnsRecentered = Math.abs
+            ( 
+                0.75 - this.firePolar.azimuthInTurns
+            );
+            var fireAzimuthInDegrees = Math.round
+            (
+                fireAzimuthInTurnsRecentered 
+                * Polar.DegreesPerTurn
+            );
+            var text = "Angle:" + fireAzimuthInDegrees + " Power:" + this.powerCurrent;
+            display.drawText
+            (
+                text,
+                this.collider.radius,
+                Coords.Instances.Zeroes,
+                this.color
+            );
+        }
+    }
+}
+ 
+function Circle(center, radius)
+{
+    this.center = center;
+    this.radius = radius;
+}
+ 
+function CollisionHelper()
+{
+    this.displacement = new Coords();
+}
+{
+    CollisionHelper.Instance = new CollisionHelper();
+  
+    CollisionHelper.prototype.doCirclesCollide = function(circle0, circle1)
+    {
+        var distanceBetweenCenters = this.displacement.overwriteWith
+        (
+            circle1.center
+        ).subtract
+        (
+            circle0.center
+        ).magnitude();
+  
+        var sumOfRadii = circle0.radius + circle1.radius;
+  
+        var returnValue = (distanceBetweenCenters < sumOfRadii);
+  
+        return returnValue;
+    }
+ 
+    CollisionHelper.prototype.doEdgesCollide = function(edge0, edge1)
+    {
+        var returnValue = null;
+  
+        if (this.edgeProjected == null)
+        {
+            this.edgeProjected = new Edge([new Coords(), new Coords()]);
+        }
+        var edgeProjected = this.edgeProjected;
+        edgeProjected.overwriteWith(edge1).projectOnto(edge0);
+        var edgeProjectedStart = edgeProjected.vertices[0];
+        var edgeProjectedDirection = edgeProjected.direction;      
+  
+        var distanceAlongEdgeProjectedToXAxis = 0 - edgeProjectedStart.y / edgeProjectedDirection.y
+  
+        if 
+        (
+            distanceAlongEdgeProjectedToXAxis > 0 
+            && distanceAlongEdgeProjectedToXAxis < edgeProjected.length
+        )
+        {
+            var distanceAlongEdge0ToIntersection =
+                edgeProjectedStart.x 
+                + (edgeProjectedDirection.x * distanceAlongEdgeProjectedToXAxis);
+  
+            if 
+            (
+                distanceAlongEdge0ToIntersection > 0
+                && distanceAlongEdge0ToIntersection < edge0.length
+            )
+            {
+                returnValue = true;
+            }
+        }
+  
+        return returnValue;
+    }
+}
+  
+function Coords(x, y)
+{
+    this.x = x;
+    this.y = y;
+}
+{
+    Coords.Instances = new Coords_Instances();
+  
+    function Coords_Instances()
+    {
+        this.Zeroes = new Coords(0, 0);
+    }
+  
+    Coords.prototype.add = function(other)
+    {
+        this.x += other.x;
+        this.y += other.y;
+        return this;
+    }
+ 
+    Coords.prototype.addXY = function(x, y)
+    {
+        this.x += x;
+        this.y += y;
+        return this;
+    }
+  
+    Coords.prototype.clear = function()
+    {
+        this.x = 0;
+        this.y = 0;
+    }
+  
+    Coords.prototype.clone = function()
+    {
+        return new Coords(this.x, this.y);
+    }
+  
+    Coords.prototype.divideScalar = function(scalar)
+    {
+        this.x /= scalar;
+        this.y /= scalar;   
+        return this;
+    }
+ 
+    Coords.prototype.dotProduct = function(other)
+    {
+        return this.x * other.x + this.y * other.y;
+    }
+  
+    Coords.prototype.magnitude = function()
+    {
+        return Math.sqrt(this.x * this.x + this.y * this.y);
+    }
+  
+    Coords.prototype.multiplyScalar = function(scalar)
+    {
+        this.x *= scalar;
+        this.y *= scalar;   
+        return this;
+    }
+  
+    Coords.prototype.normalize = function()
+    {
+        return this.divideScalar(this.magnitude());
+    }
+ 
+    Coords.prototype.overwriteWith = function(other)
+    {
+        this.x = other.x;
+        this.y = other.y;
+        return this;
+    }
+ 
+    Coords.prototype.overwriteWithXY = function(x, y)
+    {
+        this.x = x;
+        this.y = y;
+        return this;
+    }
+ 
+    Coords.prototype.right = function()
+    {
+        var temp = this.x;
+        this.x = 0 - this.y;
+        this.y = temp;
+        return this;
+    }
+     
+    Coords.prototype.subtract = function(other)
+    {
+        this.x -= other.x;
+        this.y -= other.y;
+        return this;
+    }
+}
+  
+function Display(size)
+{
+    this.size = size;
+  
+    this.colorBack = "White";
+    this.colorFore = "Gray";
+}
+{
+    Display.prototype.initialize = function()
+    {
+        var canvas = document.createElement("canvas");
+        canvas.width = this.size.x;
+        canvas.height = this.size.y;
+        this.graphics = canvas.getContext("2d");
+  
+        document.body.appendChild(canvas);
+    }
+  
+    // drawing
+  
+    Display.prototype.clear = function()
+    {
+        this.graphics.fillStyle = this.colorBack;
+        this.graphics.fillRect
+        (
+            0, 0, this.size.x, this.size.y
+        );
+  
+        this.graphics.strokeStyle = this.colorFore;
+        this.graphics.strokeRect
+        (
+            0, 0, this.size.x, this.size.y
+        );
+    }
+  
+    Display.prototype.drawCircle = function(center, radius, colorBorder)
+    {
+        this.graphics.strokeStyle = colorBorder;
+  
+        this.graphics.beginPath();
+        this.graphics.arc(center.x, center.y, radius, 0, Polar.RadiansPerTurn);
+        this.graphics.stroke();
+    }
+  
+    Display.prototype.drawLine = function(fromPos, toPos, color)
+    {
+        this.graphics.strokeStyle = color;
+        this.graphics.beginPath();
+        this.graphics.moveTo(fromPos.x, fromPos.y);
+        this.graphics.lineTo(toPos.x, toPos.y);
+        this.graphics.stroke();
+    }
+  
+    Display.prototype.drawRectangle = function(pos, size, colorBorder)
+    {
+        this.graphics.strokeStyle = colorBorder;
+        this.graphics.strokeRect
+        (
+            pos.x, pos.y, size.x, size.y
+        );
+    }
+  
+    Display.prototype.drawText = function(text, height, pos, color)
+    {
+        this.graphics.strokeStyle = this.colorBack;
+        this.graphics.strokeText(text, pos.x, pos.y + height);
+  
+        this.graphics.fillStyle = color;
+        this.graphics.fillText(text, pos.x, pos.y + height);
+    }
+}
+ 
+function Edge(vertices)
+{
+    this.vertices = vertices;
+ 
+    this.displacement = new Coords();
+    this.direction = new Coords();
+    this.right = new Coords();
+    this.recalculateDerivedValues();
+}
+{
+    Edge.prototype.clone = function()
+    {
+        return new Edge(this.vertices.clone());
+    }
+ 
+    Edge.prototype.overwriteWith = function(other)
+    {
+        this.vertices[0].overwriteWith(other.vertices[0]);
+        this.vertices[1].overwriteWith(other.vertices[1]);
+        this.recalculateDerivedValues();
+        return this;
+    }
+ 
+    Edge.prototype.projectOnto = function(other)
+    {
+        for (var i = 0; i < this.vertices.length; i++)
+        {
+            var vertexThis = this.vertices[i];
+  
+            vertexThis.subtract
+            (
+                other.vertices[0]
+            ).overwriteWithXY
+            (
+                vertexThis.dotProduct(other.direction),
+                vertexThis.dotProduct(other.right)
+            );
+        }
+  
+        this.recalculateDerivedValues();
+  
+        return this;
+    }
+ 
+    Edge.prototype.recalculateDerivedValues = function()
+    {
+        this.displacement.overwriteWith
+        (
+            this.vertices[1]
+        ).subtract(this.vertices[0]);
+        this.length = this.displacement.magnitude();
+        this.direction.overwriteWith(this.displacement).divideScalar(this.length);
+        this.right.overwriteWith(this.direction).right();
+    }
+}
+  
+function Globals()
+{
+    // Do nothing.
+}
+{
+    Globals.Instance = new Globals();
+  
+    Globals.prototype.initialize = function(timerTicksPerSecond, display, world)
+    {
+        this.display = display;
+        this.display.initialize();
+  
+        this.world = world;
+  
+        this.inputHelper = new InputHelper();
+          
+        var millisecondsPerTimerTick = Math.floor(1000 / this.timerTicksPerSecond);
+        this.timer = setInterval
+        (
+            this.handleEventTimerTick.bind(this), 
+            millisecondsPerTimerTick
+        );
+  
+        this.inputHelper.initialize();
+    }
+  
+    // events
+  
+    Globals.prototype.handleEventTimerTick = function()
+    {
+        this.world.drawToDisplay(this.display);
+        this.world.updateForTimerTick();
+    }
+}
+  
+function InputHelper()
+{
+    this.keyPressed = null;
+}
+{
+    InputHelper.prototype.initialize = function()
+    {
+        document.body.onkeydown = this.handleEventKeyDown.bind(this);
+    }
+  
+    // events 
+  
+    InputHelper.prototype.handleEventKeyDown = function(event)
+    {
+        this.keyPressed = event.key;
+    }
+}
+  
+function Landscape(size, horizonPoints)
+{
+    this.size = size;
+    this.color = "Green";   
+ 
+    this.edges = [];
+    var horizonPointPrev = horizonPoints[0];
+    for (var i = 1; i < horizonPoints.length; i++)
+    {
+        var horizonPoint = horizonPoints[i];
+        var edge = new Edge([horizonPointPrev, horizonPoint]);
+        this.edges.push(edge);
+        horizonPointPrev = horizonPoint;
+    }
+}
+{
+    Landscape.random = function(size, numberOfPoints)
+    {
+        var points = [];
+        for (var i = 0; i < numberOfPoints + 1; i++)
+        {
+            var point = new Coords(i * size.x / numberOfPoints, 0);
+            points.push(point);
+        }
+  
+        var returnValue = new Landscape(size, points).randomize();
+  
+        return returnValue;
+    }
+  
+    // instance methods
+  
+    Landscape.prototype.altitudeAtX = function(xToCheck)
+    {
+        var returnValue;
+  
+        for (var i = 0; i < this.edges.length; i++)
+        {
+            var edge = this.edges[i];
+            var horizonPointPrev = edge.vertices[0];
+            var horizonPoint = edge.vertices[1];
+ 
+            if (horizonPoint.x > xToCheck)
+            {
+                var horizonChange = horizonPoint.clone().subtract
+                (
+                    horizonPointPrev
+                );
+      
+                var t = (xToCheck - horizonPointPrev.x)/(horizonChange.x);
+  
+                var altitude = 
+                    horizonPointPrev.y 
+                    + (t * horizonChange.y);
+  
+                returnValue = altitude;
+                break;
+            }
+  
+            horizonPointPrev = horizonPoint;
+        }
+  
+        return returnValue;      
+    }
+ 
+    Landscape.prototype.collidesWithEdge = function(edgeOther)
+    {
+        var returnValue = false;
+        var collisionHelper = CollisionHelper.Instance;
+        for (var i = 0; i < this.edges.length; i++)
+        {
+            var edgeThis = this.edges[i];
+            var doEdgesCollide = collisionHelper.doEdgesCollide
+            (
+                edgeThis, edgeOther
+            );
+            if (doEdgesCollide == true)
+            {
+                returnValue = true;
+                break;
+            }
+        }
+        return returnValue
+    }
+  
+    Landscape.prototype.randomize = function()
+    {
+        var altitudeMid = this.size.y / 2;
+        var altitudeRange = this.size.y / 2;
+        var altitudeRangeHalf = altitudeRange / 2;
+        var altitudeMin = altitudeMid - altitudeRangeHalf;
+        var altitudeMax = altitudeMin + altitudeRange;
+  
+        this.edges[0].vertices[0].y = 
+            altitudeMin + Math.random() * altitudeRange;
+        for (var i = 0; i < this.edges.length; i++)
+        {
+            var edge = this.edges[i];
+            var point = edge.vertices[1];
+            point.y = altitudeMin + Math.random() * altitudeRange;
+            edge.recalculateDerivedValues();
+        }
+  
+        return this;        
+    }
+  
+    // drawable
+      
+    Landscape.prototype.drawToDisplay = function(display)
+    {
+        for (var i = 0; i < this.edges.length; i++)
+        {
+            var edge = this.edges[i];
+            display.drawLine(edge.vertices[0], edge.vertices[1], this.color);
+        }
+    }
+}
+  
+function Polar(azimuthInTurns, radius)
+{
+    this.azimuthInTurns = azimuthInTurns;
+    this.radius = radius;
+}
+{
+    Polar.RadiansPerTurn = Math.PI * 2;
+    Polar.DegreesPerTurn = 360;
+  
+    Polar.prototype.toCoords = function(coords)
+    {
+        var azimuthInRadians = this.azimuthInTurns * Polar.RadiansPerTurn; 
+        coords.x = Math.cos(azimuthInRadians) * this.radius;
+        coords.y = Math.sin(azimuthInRadians) * this.radius;
+        return coords;
+    }
+  
+    Polar.prototype.trimAzimuthToRangeMinMax = function(min, max)
+    {
+        if (this.azimuthInTurns < min)
+        {
+            this.azimuthInTurns = min;
+        }
+        else if (this.azimuthInTurns > max)
+        {
+            this.azimuthInTurns = max;
+        }
+        return this;
+    }
+}
+  
+function Projectile(color, pos, vel)
+{
+    this.color = color;
+    this.pos = pos;
+    this.vel = vel;
+  
+    this.collider = new Circle(this.pos, 2);
+  
+    this.ticksSinceExplosion = null;
+    this.ticksToExplode = 30;
+    this.radiusExplodingMax = 20;
+}
+{
+    Projectile.prototype.radiusCurrent = function()
+    {
+        var radiusCurrent = 
+            this.radiusExplodingMax 
+             this.ticksSinceExplosion 
+             this.ticksToExplode;
+ 
+        return radiusCurrent;
+    }
+  
+    Projectile.prototype.updateForTimerTick = function(world)
+    {
+        if (this.ticksSinceExplosion == null)
+        {
+            this.vel.add(world.gravityPerTick);
+            this.pos.add(this.vel);
+            if (this.pos.y > world.size.y)
+            {
+                world.projectiles.length = 0;
+            }
+            else
+            {
+                var surfaceAltitude = world.landscape.altitudeAtX(this.pos.x);
+                var isBeneathHorizon = (this.pos.y >= surfaceAltitude);
+                if (isBeneathHorizon == true)
+                {
+                    this.ticksSinceExplosion = 0;
+                    this.pos.y = surfaceAltitude;
+                }
+            }
+        }
+        else if (this.ticksSinceExplosion < this.ticksToExplode)
+        {
+            this.ticksSinceExplosion++;
+        }
+        else
+        {  
+            var collisionHelper = CollisionHelper.Instance;
+            var actors = world.actors;
+            for (var i = 0; i < actors.length; i++)
+            {
+                var actor = actors[i];
+ 
+                this.collider.radius = this.radiusCurrent();
+                var isActorWithinExplosionRadius = collisionHelper.doCirclesCollide
+                (
+                    this.collider, actor.collider
+                );
+ 
+                if (isActorWithinExplosionRadius == true)
+                {
+                    var edgeFromExplosionToActor = new Edge
+                    ([
+                        this.pos.clone().addXY(0, -1), // hack 
+                        actor.pos.clone().addXY(0, -1)
+                    ]);
+                    var isExplosionBlockedByGround = world.landscape.collidesWithEdge
+                    (
+                        edgeFromExplosionToActor
+                    );
+ 
+                    if (isExplosionBlockedByGround == false)
+                    {
+                        var actorOther = actors[1 - i];
+                        actorOther.ticksSinceKilled = 0;
+                        actorOther.wins++;
+                    }
+                }
+            }
+            world.projectiles.length = 0;
+        }
+    }
+ 
+
+    Projectile.prototype.drawToDisplay = function(display)
+    {
+        if (this.ticksSinceExplosion == null)
+        {
+            display.drawCircle
+            (
+                this.pos, this.collider.radius, this.color
+            );
+            display.drawLine
+            (
+                this.pos, 
+                this.pos.clone().subtract(this.vel), 
+                this.color
+            );
+        }
+        else
+        {
+            display.drawCircle(this.pos, this.radiusCurrent(), this.color);
+        }
+    }
+}
+  
+function World(gravityPerTick, size, landscape, actors)
+{
+    this.gravityPerTick = gravityPerTick;
+    this.size = size;
+    this.landscape = landscape;
+    this.actors = actors;
+  
+    this.actorIndexCurrent = 0;
+    this.projectiles = [];
+}
+{
+    World.random = function(gravityPerTick, size)
+    {
+        var landscape = Landscape.random(size, 10);
+  
+        var actors = 
+        [
+            new Actor
+            (
+                "Blue", 
+                new Coords(size.x / 6, 0),
+                Activity.Instances.UserInputAccept
+            ), 
+            new Actor
+            (
+                "Red", 
+                new Coords(5 * size.x / 6, 0),
+                Activity.Instances.UserInputAccept
+            ), 
+        ];
+  
+        var returnValue = new World
+        (
+            gravityPerTick,
+            size,
+            landscape,
+            actors
+        );
+  
+        return returnValue;
+    }
+
+  
+    World.prototype.actorCurrent = function()
+    {
+        return this.actors[this.actorIndexCurrent];
+    }
+  
+    World.prototype.actorCurrentAdvance = function()
+    {
+        this.actorIndexCurrent = this.actors.length - 1 - this.actorIndexCurrent;
+    }
+  
+    World.prototype.reset = function()
+    {
+        this.landscape.randomize();
+        for (var i = 0; i < this.actors.length; i++)
+        {
+            var actor = this.actors[i];
+            actor.reset();
+        }   
+    }
+  
+    World.prototype.updateForTimerTick = function()
+    {
+        for (var i = 0; i < this.projectiles.length; i++)
+        {
+            var projectile = this.projectiles[i];
+            projectile.updateForTimerTick(this);
+        }
+  
+        for (var i = 0; i < this.actors.length; i++)
+        {
+            var actor = this.actors[i];
+            actor.updateForTimerTick(this);
+        }
+    }
+  
+  
+  
+    World.prototype.drawToDisplay = function(display)
+    {
+        display.clear();
+        this.landscape.drawToDisplay(display);
+  
+        for (var i = 0; i < this.actors.length; i++)
+        {
+            var actor = this.actors[i];
+            actor.drawToDisplay(display);
+            display.drawText("" + actor.wins, actor.radius, actor.pos, actor.color);
+        }
+  
+        for (var i = 0; i < this.projectiles.length; i++)
+        {
+            var projectile = this.projectiles[i];
+            projectile.drawToDisplay(display);
+        }
+    }
+}
+  
+
+  
+main();
+  
+</script>
+	
+</body>
+</html>

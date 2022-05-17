@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>GAME!</title>
+	<style>
+		*{
+			font-family: "Lucida Console", "Courier New", monospace;
+		}
+		h1, h2{
+			text-align: center;
+			padding-left: 50px;
+			font-weight: bold;
+		}
+		#select{
+			height: 100px;
+		}
+		select, button{
+			margin-left: 47%;
+			padding: 4px;
+			margin-bottom: 4px;
+			width: 120px;
+		}
+	</style>
+</head>
+<body>
+	<h1>SHOOTING GAME!</h1>
+	<div id="select">
+		<h2>CHOOSE MODE</h2>
+		<select name="mode" id="gamemode">
+			<option value="player2">2 Players</option>
+			<option value="player3">3 Players</option>
+			<option value="player4">4 Players</option>
+			<option value="player5">5 Players</option>
+		</select>
+		<button id="play" onclick="play()">Play</button>
+	</div>
+
+	<div class="gameboard"></div>
+	
+	<div style="float: left; margin-left: 450px">
+		<canvas id="canvas" tabindex="0" width="600px" height="500px" style="border: 1px solid"></canvas>
+	</div>
+	<div id="output" style="float: left;width: 200px;height: 500px; border: 1px solid"></div>
+
+<script src="js/main.js"></script>
+<script src="js/ImgLoader.js"></script>
+<script src="js/AnimatedSprite.js"></script>
+<script src="js/map.js"></script>
+<script src="js/cannon.js"></script>
+<script src="js/ball.js"></script>
+</body>
+</html>
